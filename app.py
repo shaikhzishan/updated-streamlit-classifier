@@ -2,13 +2,14 @@ import streamlit as st
 from PIL import Image
 import tensorflow as tf
 import numpy as np
-import matplotlib.cm as cm
 import cv2
+import matplotlib.cm as cm
 
 # --- Page config ---
 st.set_page_config(page_title="Flower Classifier with Grad-CAM", layout="wide")
 
 # --- Helper functions ---
+
 @st.cache_resource
 def load_model():
     """
@@ -40,7 +41,9 @@ def build_augmentation_pipeline():
 def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations: int = 3):
     """
     Apply augmentations to the image and average model predictions.
-    Returns averaged probabilities and augmented images for display.
+    Returns:
+      - averaged_probs: averaged probabilities across augmentations
+      - augmented_display_uint8: augmented images as uint8 for display
     """
     base_arr = pil_to_model_array(pil_image)
     base_batch = np.expand_dims(base_arr, axis=0).astype(np.float32)
@@ -50,17 +53,17 @@ def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations:
     aug_pipeline = build_augmentation_pipeline()
     augmented_batch = aug_pipeline(batch, training=True)
 
-    # Clip values for displaying augmented images
+    # For displaying augmented images: clip to [0, 255] and convert to uint8
     augmented_display = tf.clip_by_value(augmented_batch, 0.0, 255.0)
     augmented_display_uint8 = tf.cast(augmented_display, tf.uint8).numpy()
 
-    # Preprocess for MobileNetV2
+    # Preprocess for MobileNetV2 prediction
     processed = tf.keras.applications.mobilenet_v2.preprocess_input(augmented_batch.numpy())
 
     preds = model.predict(processed, verbose=0)
     averaged_probs = np.mean(preds, axis=0)
 
-    return averaged_probs, augmented_display_uint8
+    return averaged_probs, augmented_display_uint8, augmented_batch, preds, processed
 
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
     """
@@ -79,8 +82,9 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None
     )
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
+        predictions = tf.convert_to_tensor(predictions)
         if pred_index is None:
-            pred_index = tf.argmax(predictions[0])
+            pred_index = tf.argmax(predictions[0]).numpy()
         class_channel = predictions[:, pred_index]
 
     grads = tape.gradient(class_channel, conv_outputs)
@@ -117,6 +121,7 @@ def overlay_heatmap_on_image(img: Image.Image, heatmap: np.ndarray, alpha=0.4):
 flower_classes = ['dandelion', 'daisy', 'tulips', 'sunflowers', 'roses']
 
 # --- Main app UI and logic ---
+
 st.title("🌸 Flower Classifier (tf_flowers) with Augmentation & Grad-CAM")
 st.write("""
 Upload a flower image, and get predictions from a fine-tuned MobileNetV2 model.
@@ -169,7 +174,7 @@ if uploaded_file is not None:
 
     # Augmentation-based prediction
     with st.spinner(f"Classifying with {num_augmentations} augmentations..."):
-        averaged_probs, augmented_images = predict_with_augmentations(model, image, num_augmentations)
+        averaged_probs, augmented_images, augmented_batch, augmented_preds, processed = predict_with_augmentations(model, image, num_augmentations)
         top_indices_avg = averaged_probs.argsort()[-3:][::-1]
 
     st.subheader(f"Top-3 Predictions (Averaged over {num_augmentations} augmentations)")
@@ -192,4 +197,15 @@ if uploaded_file is not None:
             pred_index = np.argmax(augmented_preds[i])
             heatmap = make_gradcam_heatmap(processed[i:i+1], model, last_conv_layer_name, pred_index)
 
-            # Use clipped uint
+            # Use clipped uint8 image for overlay
+            aug_img_pil = Image.fromarray(augmented_images[i])
+            overlayed = overlay_heatmap_on_image(aug_img_pil, heatmap)
+            overlayed_aug_imgs.append(overlayed)
+
+        cols = st.columns(min(4, num_augmentations))
+        for idx in range(num_augmentations):
+            cols[idx % len(cols)].image(overlayed_aug_imgs[idx], use_column_width=True, caption=f"Augmented + Grad-CAM #{idx+1}")
+
+st.markdown("---")
+st.caption("Built with Streamlit + TensorFlow | Fine-tuned on tf_flowers dataset | Shows augmentation-based predictions and Grad-CAM heatmaps.")
+
