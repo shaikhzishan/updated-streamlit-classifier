@@ -63,9 +63,6 @@ def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations:
     return averaged_probs, augmented_display_uint8
 
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_index=None):
-    """
-    Generate Grad-CAM heatmap for the image and model.
-    """
     grad_model = tf.keras.models.Model(
         [model.inputs],
         [model.get_layer(last_conv_layer_name).output, model.output]
@@ -75,6 +72,7 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_i
         conv_outputs, predictions = grad_model(img_array)
         if pred_index is None:
             pred_index = tf.argmax(predictions[0])
+        pred_index = int(pred_index.numpy())  # <-- fix here
         class_channel = predictions[:, pred_index]
 
     grads = tape.gradient(class_channel, conv_outputs)
@@ -85,6 +83,7 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_i
     heatmap = tf.squeeze(heatmap)
     heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
     return heatmap.numpy()
+
 
 def overlay_gradcam(image, heatmap, alpha=0.4):
     """
