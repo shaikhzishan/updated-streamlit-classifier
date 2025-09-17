@@ -6,30 +6,27 @@ import os
 import matplotlib.cm as cm
 
 # --- Page config ---
-st.set_page_config(page_title="Universal Image Classifier", layout="wide")
+st.set_page_config(page_title="Flower Classifier", layout="wide")
 
-# --- Helper functions ---
+# --- Class Names for tf_flowers ---
+CLASS_NAMES = ['daisy', 'dandelion', 'roses', 'sunflowers', 'tulips']
 
+# --- Load CSS if available ---
 def load_css(file_name: str):
-    """Load CSS file into Streamlit if exists (silent fallback)."""
     if os.path.exists(file_name):
         with open(file_name) as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 @st.cache_resource
 def load_model():
-    """Load MobileNetV2 model (pretrained on ImageNet)."""
-    model = tf.keras.applications.MobileNetV2(weights="imagenet")
-    return model
+    return tf.keras.models.load_model("flowers_model.h5")
 
 def pil_to_model_array(image: Image.Image, target_size=(224, 224)):
-    """Convert PIL image to a float32 numpy array suitable for the model."""
     img = image.convert("RGB").resize(target_size)
-    arr = tf.keras.preprocessing.image.img_to_array(img)  # float32
+    arr = tf.keras.preprocessing.image.img_to_array(img)
     return arr
 
 def build_augmentation_pipeline():
-    """Create augmentation pipeline using Keras preprocessing layers."""
     return tf.keras.Sequential([
         tf.keras.layers.RandomFlip("horizontal_and_vertical"),
         tf.keras.layers.RandomRotation(0.12),
@@ -38,7 +35,6 @@ def build_augmentation_pipeline():
     ])
 
 def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations: int = 3):
-    """Apply augmentations, predict with model, return averaged probs + augmented images."""
     base_arr = pil_to_model_array(pil_image)
     base_batch = np.expand_dims(base_arr, axis=0).astype(np.float32)
     base_batch_tf = tf.convert_to_tensor(base_batch)
@@ -56,16 +52,12 @@ def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations:
     averaged_probs = np.mean(preds, axis=0)
     return averaged_probs, augmented_display_uint8
 
-def decode_top_k_from_probs(probs: np.ndarray, top_k: int = 3):
-    """Decode top-k predictions from probs array."""
-    decoded = tf.keras.applications.mobilenet_v2.decode_predictions(
-        np.expand_dims(probs, axis=0), top=top_k
-    )[0]
-    return decoded
+def decode_top_k_custom(probs: np.ndarray, top_k: int = 3):
+    indices = np.argsort(probs)[::-1][:top_k]
+    return [(CLASS_NAMES[i], probs[i]) for i in indices]
 
-# --- Grad-CAM functions ---
+# --- Grad-CAM ---
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_index=None):
-    """Generate Grad-CAM heatmap for an image and model."""
     grad_model = tf.keras.models.Model(
         [model.inputs],
         [model.get_layer(last_conv_layer_name).output, model.output]
@@ -87,7 +79,6 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_i
     return heatmap.numpy()
 
 def overlay_gradcam(image, heatmap, alpha=0.4):
-    """Overlay Grad-CAM heatmap on original image."""
     img = np.array(image.resize((224, 224)))
     heatmap = np.uint8(255 * heatmap)
     jet = cm.get_cmap("jet")
@@ -102,16 +93,13 @@ def overlay_gradcam(image, heatmap, alpha=0.4):
     superimposed_img = np.uint8(jet_heatmap * alpha + img)
     return Image.fromarray(superimposed_img)
 
-# --- Main App UI & Logic ---
-
+# --- Main App ---
 load_css("style.css")
 model = load_model()
 
-st.title("🖼️ Universal Image Classifier with Augmentation + Grad-CAM")
-st.write(
-    "Upload an image to get predictions from **MobileNetV2**. "
-    "The app applies augmentations for robust classification and shows a **Grad-CAM heatmap** for explainability."
-)
+st.title("🌸 Flower Classifier with Augmentations & Grad-CAM")
+st.write("Upload a flower image to classify it using your **custom-trained MobileNetV2** model. "
+         "See augmented predictions and a Grad-CAM heatmap for model explainability.")
 
 # Sidebar
 with st.sidebar:
@@ -120,7 +108,7 @@ with st.sidebar:
     show_augmented = st.checkbox("Show augmented images", value=True)
     show_original_prediction = st.checkbox("Show original image prediction", value=True)
 
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Upload a flower image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
@@ -132,37 +120,37 @@ if uploaded_file is not None:
         with st.spinner("Classifying original image..."):
             arr = pil_to_model_array(image)
             proc = tf.keras.applications.mobilenet_v2.preprocess_input(np.expand_dims(arr, axis=0))
-            preds_orig = model.predict(proc, verbose=0)
-            decoded_orig = tf.keras.applications.mobilenet_v2.decode_predictions(preds_orig, top=3)[0]
+            preds_orig = model.predict(proc, verbose=0)[0]
+            top_preds = decode_top_k_custom(preds_orig)
 
-        st.subheader("Top-3 Predictions (Original Image)")
-        for i, (imagenet_id, label, score) in enumerate(decoded_orig):
-            st.write(f"{i+1}. **{label.replace('_',' ').title()}** — {score:.2%}")
+        st.subheader("Top Predictions (Original Image)")
+        for i, (label, score) in enumerate(top_preds):
+            st.write(f"{i+1}. **{label.title()}** — {score:.2%}")
 
-    # Augmentation-based prediction
+    # Augmented image prediction
     with st.spinner(f"Classifying with {num_augmentations} augmentations..."):
         averaged_probs, augmented_images = predict_with_augmentations(model, image, num_augmentations)
-        decoded_avg = decode_top_k_from_probs(averaged_probs, top_k=3)
+        decoded_avg = decode_top_k_custom(averaged_probs)
 
-    st.subheader(f"Top-3 Predictions (Averaged over {num_augmentations} augmentations)")
-    for i, (imagenet_id, label, score) in enumerate(decoded_avg):
-        st.write(f"{i+1}. **{label.replace('_',' ').title()}** — {score:.2%}")
+    st.subheader(f"Top Predictions (Averaged over {num_augmentations} augmentations)")
+    for i, (label, score) in enumerate(decoded_avg):
+        st.write(f"{i+1}. **{label.title()}** — {score:.2%}")
 
     # Show augmented images
     if show_augmented:
-        st.subheader("Augmented Images Used for Prediction")
+        st.subheader("Augmented Images Used")
         cols = st.columns(min(4, num_augmentations))
         for idx in range(num_augmentations):
             aug_pil = Image.fromarray(augmented_images[idx])
-            cols[idx % len(cols)].image(aug_pil, use_column_width=True, caption=f"Augmented #{idx+1}")
+            cols[idx % len(cols)].image(aug_pil, use_column_width=True, caption=f"Aug #{idx+1}")
 
-    # Grad-CAM on original
-    st.subheader("Grad-CAM Heatmap (Model Attention)")
+    # Grad-CAM
+    st.subheader("Grad-CAM Heatmap")
     arr = pil_to_model_array(image)
     proc = tf.keras.applications.mobilenet_v2.preprocess_input(np.expand_dims(arr, axis=0))
     heatmap = make_gradcam_heatmap(proc, model, last_conv_layer_name="Conv_1")
     gradcam_img = overlay_gradcam(image, heatmap)
-    st.image(gradcam_img, caption="Grad-CAM Visualization", use_column_width=True)
+    st.image(gradcam_img, caption="Grad-CAM (Model Attention)", use_column_width=True)
 
 st.markdown("---")
-st.caption("Built with Streamlit + TensorFlow | Demonstrates data augmentation and model explainability (Grad-CAM).")
+st.caption("Custom-trained MobileNetV2 | tf_flowers dataset | Streamlit + TensorFlow 🔍")
