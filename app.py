@@ -72,7 +72,7 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_i
         if pred_index is None:
             pred_index = tf.argmax(predictions[0])
 
-        # Fix: safely convert pred_index to int
+        # Convert pred_index safely
         if isinstance(pred_index, tf.Tensor):
             pred_index = pred_index.numpy()
         if isinstance(pred_index, np.ndarray):
@@ -82,7 +82,11 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_i
                 pred_index = int(pred_index[0])
         pred_index = int(pred_index)
 
-        class_channel = predictions[:, pred_index]
+        # Fix indexing here
+        if len(predictions.shape) == 2:
+            class_channel = predictions[:, pred_index]
+        else:
+            class_channel = predictions[pred_index]
 
     grads = tape.gradient(class_channel, conv_outputs)
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
