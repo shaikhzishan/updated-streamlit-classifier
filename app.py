@@ -41,7 +41,12 @@ def build_augmentation_pipeline():
 def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations: int = 3):
     """
     Apply augmentations to the image and average model predictions.
-    Returns averaged probabilities and augmented images for display.
+    Returns:
+      - averaged_probs: averaged probabilities across augmentations
+      - augmented_display_uint8: augmented images as uint8 for display
+      - augmented_batch: original augmented batch before preprocessing (float32)
+      - preds: predictions per augmentation
+      - processed: preprocessed batch used for prediction
     """
     base_arr = pil_to_model_array(pil_image)
     base_batch = np.expand_dims(base_arr, axis=0).astype(np.float32)
@@ -51,15 +56,16 @@ def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations:
     aug_pipeline = build_augmentation_pipeline()
     augmented_batch = aug_pipeline(batch, training=True)
 
-    # Clip values for displaying augmented images
+    # For displaying augmented images: clip to [0, 255] and convert to uint8
     augmented_display = tf.clip_by_value(augmented_batch, 0.0, 255.0)
     augmented_display_uint8 = tf.cast(augmented_display, tf.uint8).numpy()
 
-    # Preprocess for MobileNetV2
+    # Preprocess for MobileNetV2 prediction
     processed = tf.keras.applications.mobilenet_v2.preprocess_input(augmented_batch.numpy())
-    preds = model.predict(processed, verbose=0)
 
+    preds = model.predict(processed, verbose=0)
     averaged_probs = np.mean(preds, axis=0)
+
     return averaged_probs, augmented_display_uint8, augmented_batch, preds, processed
 
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
@@ -127,7 +133,7 @@ Uses augmentation and Grad-CAM for robust classification and interpretability.
 # Load model once
 model = load_model()
 
-# Find last conv layer name for Grad-CAM (MobileNetV2 usually "Conv_1")
+# Last convolutional layer name for MobileNetV2 (adjust if needed)
 last_conv_layer_name = "Conv_1"
 
 # Sidebar options
@@ -190,12 +196,11 @@ if uploaded_file is not None:
         st.subheader("Grad-CAM on Augmented Images")
         overlayed_aug_imgs = []
         for i in range(num_augmentations):
-            aug_img = augmented_batch[i:i+1]
             pred_index = np.argmax(augmented_preds[i])
-            heatmap = make_gradcam_heatmap(aug_img, model, last_conv_layer_name, pred_index)
-            # Convert augmented image tensor to PIL
-            aug_img_uint8 = tf.clip_by_value(aug_img, 0, 255)
-            aug_img_pil = Image.fromarray(tf.cast(aug_img_uint8[0], tf.uint8).numpy())
+            heatmap = make_gradcam_heatmap(processed[i:i+1], model, last_conv_layer_name, pred_index)
+
+            # Use clipped uint8 image for overlay
+            aug_img_pil = Image.fromarray(augmented_images[i])
             overlayed = overlay_heatmap_on_image(aug_img_pil, heatmap)
             overlayed_aug_imgs.append(overlayed)
 
