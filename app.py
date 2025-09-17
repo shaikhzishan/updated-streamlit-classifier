@@ -2,7 +2,6 @@ import streamlit as st
 from PIL import Image
 import tensorflow as tf
 import numpy as np
-import matplotlib.cm as cm
 
 # --- Page config ---
 st.set_page_config(page_title="Flower Classifier", layout="wide")
@@ -61,69 +60,15 @@ def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations:
     averaged_probs = np.mean(preds, axis=0)
     return averaged_probs, augmented_display_uint8
 
-def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_index=None):
-    grad_model = tf.keras.models.Model(
-        [model.inputs],
-        [model.get_layer(last_conv_layer_name).output, model.output]
-    )
-
-    with tf.GradientTape() as tape:
-        conv_outputs, predictions = grad_model(img_array)
-        if pred_index is None:
-            pred_index = tf.argmax(predictions[0])
-
-        # Convert pred_index safely
-        if isinstance(pred_index, tf.Tensor):
-            pred_index = pred_index.numpy()
-        if isinstance(pred_index, np.ndarray):
-            if pred_index.size == 1:
-                pred_index = pred_index.item()
-            else:
-                pred_index = int(pred_index[0])
-        pred_index = int(pred_index)
-
-        # Fix indexing here
-        if len(predictions.shape) == 2:
-            class_channel = predictions[:, pred_index]
-        else:
-            class_channel = predictions[pred_index]
-
-    grads = tape.gradient(class_channel, conv_outputs)
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-
-    conv_outputs = conv_outputs[0]
-    heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
-    heatmap = tf.squeeze(heatmap)
-    heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
-    return heatmap.numpy()
-
-def overlay_gradcam(image, heatmap, alpha=0.4):
-    """
-    Overlay Grad-CAM heatmap on original image.
-    """
-    img = np.array(image.resize((224, 224)))
-    heatmap = np.uint8(255 * heatmap)
-    jet = cm.get_cmap("jet")
-    jet_colors = jet(np.arange(256))[:, :3]
-    jet_heatmap = jet_colors[heatmap]
-
-    jet_heatmap = Image.fromarray((jet_heatmap * 255).astype(np.uint8)).resize(
-        (img.shape[1], img.shape[0])
-    )
-    jet_heatmap = np.array(jet_heatmap)
-
-    superimposed_img = np.uint8(jet_heatmap * alpha + img)
-    return Image.fromarray(superimposed_img)
-
 # --- Class names in correct order from tf_flowers ---
 flower_classes = ['dandelion', 'daisy', 'tulips', 'sunflowers', 'roses']
 
 # --- Main app UI and logic ---
 
-st.title("🌸 Flower Classifier (tf_flowers) with Augmentation + Grad-CAM")
+st.title("🌸 Flower Classifier (tf_flowers) with Augmentation")
 st.write("""
 Upload a flower image, and get predictions from a fine-tuned MobileNetV2 model.
-Uses augmentation for robust classification and Grad-CAM for explainability.
+Uses augmentation for robust classification.
 """)
 
 # Load model once
@@ -174,13 +119,5 @@ if uploaded_file is not None:
             aug_pil = Image.fromarray(augmented_images[idx])
             cols[idx % len(cols)].image(aug_pil, use_column_width=True, caption=f"Augmented #{idx+1}")
 
-    # Grad-CAM heatmap visualization on original image
-    st.subheader("Grad-CAM Heatmap (Model Attention)")
-    arr = pil_to_model_array(image)
-    proc = tf.keras.applications.mobilenet_v2.preprocess_input(np.expand_dims(arr, axis=0))
-    heatmap = make_gradcam_heatmap(proc, model, last_conv_layer_name="Conv_1")
-    gradcam_img = overlay_gradcam(image, heatmap)
-    st.image(gradcam_img, caption="Grad-CAM Visualization", use_column_width=True)
-
 st.markdown("---")
-st.caption("Built with Streamlit + TensorFlow | Fine-tuned on tf_flowers dataset | Shows augmentation-based predictions and Grad-CAM explainability.")
+st.caption("Built with Streamlit + TensorFlow | Fine-tuned on tf_flowers dataset | Shows augmentation-based predictions.")
