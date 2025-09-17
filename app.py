@@ -4,19 +4,27 @@ import tensorflow as tf
 import numpy as np
 import cv2
 import matplotlib.cm as cm
+import os
+import requests
 
 # --- Page config ---
 st.set_page_config(page_title="Flower Classifier with Grad-CAM", layout="wide")
 
 # --- Helper functions ---
-
-@st.cache_resource
+@st.cache
 def load_model():
     """
-    Load your fine-tuned MobileNetV2 model trained on tf_flowers dataset.
-    Make sure 'flowers_model.h5' is in the same directory or update path.
+    Load your fine-tuned MobileNetV2 model trained on the tf_flowers dataset.
+    Make sure 'flowers_model.h5' is in the same directory or provide a URL to download it.
     """
-    model = tf.keras.models.load_model("flowers_model.h5")
+    model_path = "flowers_model.h5"
+    if not os.path.exists(model_path):
+        url = "YOUR_MODEL_DOWNLOAD_URL_HERE"  # Replace with your model's URL
+        print("Downloading model...")
+        r = requests.get(url)
+        with open(model_path, 'wb') as f:
+            f.write(r.content)
+    model = tf.keras.models.load_model(model_path)
     return model
 
 def pil_to_model_array(image: Image.Image, target_size=(224, 224)):
@@ -41,12 +49,6 @@ def build_augmentation_pipeline():
 def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations: int = 3):
     """
     Apply augmentations to the image and average model predictions.
-    Returns:
-      - averaged_probs: averaged probabilities across augmentations
-      - augmented_display_uint8: augmented images as uint8 for display
-      - augmented_batch: original augmented batch before preprocessing (float32)
-      - preds: predictions per augmentation
-      - processed: preprocessed batch used for prediction
     """
     base_arr = pil_to_model_array(pil_image)
     base_batch = np.expand_dims(base_arr, axis=0).astype(np.float32)
@@ -71,16 +73,9 @@ def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations:
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
     """
     Generates a Grad-CAM heatmap for a given image and model.
-    Args:
-        img_array: Preprocessed input image array of shape (1, H, W, C)
-        model: The keras model
-        last_conv_layer_name: Name of the last conv layer in the model
-        pred_index: Index of the predicted class to generate heatmap for (optional)
-    Returns:
-        heatmap: 2D numpy array of shape (H, W) with values between 0 and 1
     """
     grad_model = tf.keras.models.Model(
-        [model.inputs], 
+        [model.inputs],
         [model.get_layer(last_conv_layer_name).output, model.output]
     )
     with tf.GradientTape() as tape:
@@ -122,19 +117,18 @@ def overlay_heatmap_on_image(img: Image.Image, heatmap: np.ndarray, alpha=0.4):
 # --- Class names in correct order from tf_flowers ---
 flower_classes = ['dandelion', 'daisy', 'tulips', 'sunflowers', 'roses']
 
-# --- Main app UI and logic ---
-
+# --- Main app UI ---
 st.title("🌸 Flower Classifier (tf_flowers) with Augmentation & Grad-CAM")
 st.write("""
-Upload a flower image, and get predictions from a fine-tuned MobileNetV2 model.
+Upload a flower image and get predictions from a fine-tuned MobileNetV2 model.
 Uses augmentation and Grad-CAM for robust classification and interpretability.
 """)
 
 # Load model once
 model = load_model()
 
-# Last convolutional layer name for MobileNetV2 (adjust if needed)
-last_conv_layer_name = "Conv_1"
+# Last convolutional layer name (check your model)
+last_conv_layer_name = "Conv_1"  # Change this if needed
 
 # Sidebar options
 with st.sidebar:
@@ -209,4 +203,4 @@ if uploaded_file is not None:
             cols[idx % len(cols)].image(overlayed_aug_imgs[idx], use_column_width=True, caption=f"Augmented + Grad-CAM #{idx+1}")
 
 st.markdown("---")
-st.caption("Built with Streamlit + TensorFlow | Fine-tuned on tf_flowers dataset | Shows augmentation-based predictions and Grad-CAM heatmaps.")
+st.caption("Built with Streamlit + TensorFlow |
