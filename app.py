@@ -64,8 +64,7 @@ def predict_with_augmentations(model, pil_image: Image.Image, num_augmentations:
 
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_index=None):
     """
-    Generate Grad-CAM heatmap for the given image and model.
-    Fixed to avoid .numpy() error by using tf.keras.backend.get_value.
+    Generate Grad-CAM heatmap for an image and model with safe indexing.
     """
     grad_model = tf.keras.models.Model(
         [model.inputs],
@@ -76,8 +75,11 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name="Conv_1", pred_i
         conv_outputs, predictions = grad_model(img_array)
         if pred_index is None:
             pred_index = tf.argmax(predictions[0])
-        # safer conversion instead of pred_index.numpy()
-        pred_index = tf.keras.backend.get_value(pred_index)
+        # Safely convert pred_index tensor to int for indexing
+        if tf.executing_eagerly():
+            pred_index = int(pred_index.numpy())
+        else:
+            pred_index = int(tf.keras.backend.get_value(pred_index))
         class_channel = predictions[:, pred_index]
 
     grads = tape.gradient(class_channel, conv_outputs)
