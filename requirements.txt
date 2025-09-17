@@ -1,7 +1,6 @@
 streamlit
 tensorflow
+opencv-python
+numpy
 Pillow
-numpy 
-matplotlib 
-protobuf
-opencv
+matplotlib
