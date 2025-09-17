@@ -4,4 +4,3 @@ Pillow
 numpy 
 matplotlib 
 protobuf
-cv2
